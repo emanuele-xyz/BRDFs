@@ -39,8 +39,6 @@ static LRESULT Win32WindowProc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lp
     }
 
     return result;
-
-    // TODO: to be implemented
 }
 
 // ---------- Win32 Utilities ----------
