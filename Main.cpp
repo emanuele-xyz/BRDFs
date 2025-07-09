@@ -16,9 +16,14 @@ namespace wrl = Microsoft::WRL;
 // ---------- D3D11 and DXGI ----------
 
 #include <d3d11.h>
-#include <dxgi1_2.h>
+#include <dxgi1_3.h>
+#if defined(_DEBUG)
+#include <dxgidebug.h>
+#endif
 
 #pragma comment(lib, "d3d11")
+#pragma comment(lib, "dxgi")
+#pragma comment(lib, "dxguid")
 
 // ---------- Constants ----------
 
@@ -81,7 +86,17 @@ static HWND CreateWin32Window()
     return window;
 }
 
-// ---------- Win32 Utilities ----------
+// ---------- D3D11 and DXGI Utilities ----------
+
+static void SetupDXGIInforQueue()
+{
+    #if defined(_DEBUG)
+    wrl::ComPtr<IDXGIInfoQueue> queue{};
+    CheckHR(DXGIGetDebugInterface1(0, IID_PPV_ARGS(queue.ReleaseAndGetAddressOf())));
+    CheckHR(queue->SetBreakOnSeverity(DXGI_DEBUG_ALL, DXGI_INFO_QUEUE_MESSAGE_SEVERITY_CORRUPTION, true));
+    CheckHR(queue->SetBreakOnSeverity(DXGI_DEBUG_ALL, DXGI_INFO_QUEUE_MESSAGE_SEVERITY_ERROR, true));
+    #endif
+}
 
 static wrl::ComPtr<ID3D11Device> CreateD3D11Device()
 {
@@ -99,6 +114,16 @@ static wrl::ComPtr<ID3D11Device> CreateD3D11Device()
     Check(required_lvl == supported_lvl);
 
     return d3d_dev;
+}
+
+static void SetupD3D11InfoQueue([[maybe_unused]] ID3D11Device* d3d_dev)
+{
+    #if defined(_DEBUG)
+    wrl::ComPtr<ID3D11InfoQueue> queue{};
+    CheckHR(d3d_dev->QueryInterface(queue.ReleaseAndGetAddressOf()));
+    CheckHR(queue->SetBreakOnSeverity(D3D11_MESSAGE_SEVERITY_CORRUPTION, true));
+    CheckHR(queue->SetBreakOnSeverity(D3D11_MESSAGE_SEVERITY_ERROR, true));
+    #endif
 }
 
 static wrl::ComPtr<IDXGISwapChain1> CreateDXGISwapChain(ID3D11Device* d3d_dev, HWND hwnd)
@@ -150,8 +175,14 @@ static void Entry()
     // create win32 window
     HWND window{ CreateWin32Window() };
 
+    // setup dxgi info queue
+    SetupDXGIInforQueue();
+
     // create d3d11 device
     wrl::ComPtr<ID3D11Device> d3d_dev{ CreateD3D11Device() };
+
+    // setup d3d11 info queue
+    SetupD3D11InfoQueue(d3d_dev.Get());
 
     // get d3d11 immediate device context
     wrl::ComPtr<ID3D11DeviceContext> d3d_ctx{};
