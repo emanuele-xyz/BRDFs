@@ -36,6 +36,10 @@ constexpr const char* WIN32_WINDOW_TITLE{ "BRDFs" };
 #define Check(p) do { if (!(p)) Crash("Assertion failed: " #p); } while (false)
 #define CheckHR(hr) Check(SUCCEEDED(hr))
 
+// ---------- Global State ----------
+
+static bool s_did_resize{};
+
 // ---------- Window Procedure ----------
 
 static LRESULT Win32WindowProc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam)
@@ -47,6 +51,11 @@ static LRESULT Win32WindowProc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lp
     case WM_DESTROY:
     {
         PostQuitMessage(0);
+    } break;
+    case WM_SIZE:
+    {
+        s_did_resize = true;
+        result = DefWindowProcA(hwnd, message, wparam, lparam);
     } break;
     default:
     {
@@ -162,6 +171,41 @@ static wrl::ComPtr<IDXGISwapChain1> CreateDXGISwapChain(ID3D11Device* d3d_dev, H
     return swap_chain;
 }
 
+class Framebuffer
+{
+public:
+    Framebuffer();
+    Framebuffer(ID3D11Device* d3d_dev, IDXGISwapChain1* swap_chain);
+    ~Framebuffer() = default;
+    Framebuffer(const Framebuffer&) = delete;
+    Framebuffer(Framebuffer&&) noexcept = default;
+    Framebuffer& operator=(const Framebuffer&) = delete;
+    Framebuffer& operator=(Framebuffer&&) noexcept = default;
+public:
+    ID3D11Texture2D* BackBuffer() const noexcept { return m_back_buffer.Get(); }
+    ID3D11RenderTargetView* BackBufferRTV() const noexcept { return m_back_buffer_rtv.Get(); }
+
+private:
+    wrl::ComPtr<ID3D11Texture2D> m_back_buffer;
+    wrl::ComPtr<ID3D11RenderTargetView> m_back_buffer_rtv;
+};
+
+Framebuffer::Framebuffer()
+    : m_back_buffer{}
+    , m_back_buffer_rtv{}
+{
+}
+Framebuffer::Framebuffer(ID3D11Device* d3d_dev, IDXGISwapChain1* swap_chain)
+    : m_back_buffer{}
+    , m_back_buffer_rtv{}
+{
+    // get swap chain back buffer
+    CheckHR(swap_chain->GetBuffer(0, IID_PPV_ARGS(m_back_buffer.ReleaseAndGetAddressOf())));
+
+    // create swap chain back buffer rtv
+    CheckHR(d3d_dev->CreateRenderTargetView(m_back_buffer.Get(), nullptr, m_back_buffer_rtv.ReleaseAndGetAddressOf()));
+}
+
 // ---------- Entry Point ----------
 
 static void Entry()
@@ -188,7 +232,11 @@ static void Entry()
     wrl::ComPtr<ID3D11DeviceContext> d3d_ctx{};
     d3d_dev->GetImmediateContext(d3d_ctx.ReleaseAndGetAddressOf());
 
-    [[maybe_unused]] wrl::ComPtr<IDXGISwapChain1> swap_chain{ CreateDXGISwapChain(d3d_dev.Get(), window) }; // TODO: it will be used
+    // create swap chain
+    wrl::ComPtr<IDXGISwapChain1> swap_chain{ CreateDXGISwapChain(d3d_dev.Get(), window) }; // TODO: it will be used
+
+    // create framebuffer
+    Framebuffer framebuffer{ d3d_dev.Get(), swap_chain.Get() };
 
     // main application loop
     {
@@ -202,7 +250,32 @@ static void Entry()
             }
             else
             {
+                // handle resize event
+                if (s_did_resize)
+                {
+                    d3d_ctx->ClearState(); // clear state (some resources may be implicitly referenced by the context)
+                    framebuffer = {}; // destroy framebuffer
+                    CheckHR(swap_chain->ResizeBuffers(0, 0, 0, DXGI_FORMAT_UNKNOWN, 0)); // resize swap chain
+                    framebuffer = { d3d_dev.Get(), swap_chain.Get() }; // create new frame buffer
+
+                    s_did_resize = false; // resize event handled
+                }
+
                 // TODO: update
+
+                // render
+                {
+                    // clear back buffer
+                    {
+                        float clear_color[4]{ 0.2f, 0.3f, 0.3f, 1.0f };
+                        d3d_ctx->ClearRenderTargetView(framebuffer.BackBufferRTV(), clear_color);
+                    }
+                }
+
+                // present
+                {
+                    CheckHR(swap_chain->Present(1, 0)); // present with vsync
+                }
             }
         }
     }
