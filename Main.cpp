@@ -25,6 +25,12 @@ namespace wrl = Microsoft::WRL;
 #pragma comment(lib, "dxgi")
 #pragma comment(lib, "dxguid")
 
+// ---------- ImGui ----------
+
+#include <imgui.h>
+#include <imgui_impl_win32.h>
+#include <imgui_impl_dx11.h>
+
 // ---------- Constants ----------
 
 constexpr const char* WIN32_WINDOW_CLASS_NAME{ "brdfs_window_class" };
@@ -42,28 +48,38 @@ static bool s_did_resize{};
 
 // ---------- Window Procedure ----------
 
+// forward declare message handler from imgui_impl_win32.cpp
+extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+
 static LRESULT Win32WindowProc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam)
 {
-    LRESULT result{};
-
-    switch (message)
+    if (ImGui_ImplWin32_WndProcHandler(hwnd, message, wparam, lparam))
     {
-    case WM_DESTROY:
-    {
-        PostQuitMessage(0);
-    } break;
-    case WM_SIZE:
-    {
-        s_did_resize = true;
-        result = DefWindowProcA(hwnd, message, wparam, lparam);
-    } break;
-    default:
-    {
-        result = DefWindowProcA(hwnd, message, wparam, lparam);
-    } break;
+        return 1;
     }
+    else
+    {
+        LRESULT result{};
 
-    return result;
+        switch (message)
+        {
+        case WM_DESTROY:
+        {
+            PostQuitMessage(0);
+        } break;
+        case WM_SIZE:
+        {
+            s_did_resize = true;
+            result = DefWindowProcA(hwnd, message, wparam, lparam);
+        } break;
+        default:
+        {
+            result = DefWindowProcA(hwnd, message, wparam, lparam);
+        } break;
+        }
+
+        return result;
+    }
 }
 
 // ---------- Win32 Utilities ----------
@@ -206,6 +222,86 @@ Framebuffer::Framebuffer(ID3D11Device* d3d_dev, IDXGISwapChain1* swap_chain)
     CheckHR(d3d_dev->CreateRenderTargetView(m_back_buffer.Get(), nullptr, m_back_buffer_rtv.ReleaseAndGetAddressOf()));
 }
 
+// ---------- ImGui Utilities ----------
+
+class ImGuiHandle
+{
+public:
+    ImGuiHandle(HWND hwnd, ID3D11Device* d3d_dev, ID3D11DeviceContext* d3d_ctx);
+    ~ImGuiHandle();
+    ImGuiHandle(const ImGuiHandle&) = delete;
+    ImGuiHandle(ImGuiHandle&) noexcept = delete;
+    ImGuiHandle& operator=(const ImGuiHandle&) = delete;
+    ImGuiHandle& operator=(ImGuiHandle&) noexcept = delete;
+public:
+    void BeginFrame() const noexcept;
+    void EndFrame(ID3D11RenderTargetView* rtv) const noexcept;
+private:
+    ID3D11DeviceContext* m_d3d_ctx;
+};
+
+ImGuiHandle::ImGuiHandle(HWND hwnd, ID3D11Device* d3d_dev, ID3D11DeviceContext* d3d_ctx)
+    : m_d3d_ctx{ d3d_ctx }
+{
+    // Make process DPI aware and obtain main monitor scale
+    //ImGui_ImplWin32_EnableDpiAwareness();
+    //float main_scale = ImGui_ImplWin32_GetDpiScaleForMonitor(::MonitorFromPoint(POINT{ 0, 0 }, MONITOR_DEFAULTTOPRIMARY));
+
+    // Setup Dear ImGui context
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    ImGuiIO& io = ImGui::GetIO(); (void)io;
+    //io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;     // Enable Keyboard Controls
+    //io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;      // Enable Gamepad Controls
+
+    // Setup Dear ImGui style
+    ImGui::StyleColorsDark();
+    //ImGui::StyleColorsLight();
+
+    // Setup scaling
+    //ImGuiStyle& style = ImGui::GetStyle();
+    //style.ScaleAllSizes(main_scale);        // Bake a fixed style scale. (until we have a solution for dynamic style scaling, changing this requires resetting Style + calling this again)
+    //style.FontScaleDpi = main_scale;        // Set initial font scale. (using io.ConfigDpiScaleFonts=true makes this unnecessary. We leave both here for documentation purpose)
+
+    // Setup Platform/Renderer backends
+    ImGui_ImplWin32_Init(hwnd);
+    ImGui_ImplDX11_Init(d3d_dev, m_d3d_ctx);
+
+    // Load Fonts
+    // - If no fonts are loaded, dear imgui will use the default font. You can also load multiple fonts and use ImGui::PushFont()/PopFont() to select them.
+    // - AddFontFromFileTTF() will return the ImFont* so you can store it if you need to select the font among multiple.
+    // - If the file cannot be loaded, the function will return a nullptr. Please handle those errors in your application (e.g. use an assertion, or display an error and quit).
+    // - Use '#define IMGUI_ENABLE_FREETYPE' in your imconfig file to use Freetype for higher quality font rendering.
+    // - Read 'docs/FONTS.md' for more instructions and details.
+    // - Remember that in C/C++ if you want to include a backslash \ in a string literal you need to write a double backslash \\ !
+    //style.FontSizeBase = 20.0f;
+    //io.Fonts->AddFontDefault();
+    //io.Fonts->AddFontFromFileTTF("c:\\Windows\\Fonts\\segoeui.ttf");
+    //io.Fonts->AddFontFromFileTTF("../../misc/fonts/DroidSans.ttf");
+    //io.Fonts->AddFontFromFileTTF("../../misc/fonts/Roboto-Medium.ttf");
+    //io.Fonts->AddFontFromFileTTF("../../misc/fonts/Cousine-Regular.ttf");
+    //ImFont* font = io.Fonts->AddFontFromFileTTF("c:\\Windows\\Fonts\\ArialUni.ttf");
+    //IM_ASSERT(font != nullptr);
+}
+ImGuiHandle::~ImGuiHandle()
+{
+    ImGui_ImplDX11_Shutdown();
+    ImGui_ImplWin32_Shutdown();
+    ImGui::DestroyContext();
+}
+void ImGuiHandle::BeginFrame() const noexcept
+{
+    ImGui_ImplDX11_NewFrame();
+    ImGui_ImplWin32_NewFrame();
+    ImGui::NewFrame();
+}
+void ImGuiHandle::EndFrame(ID3D11RenderTargetView* rtv) const noexcept
+{
+    ImGui::Render();
+    m_d3d_ctx->OMSetRenderTargets(1, &rtv, nullptr);
+    ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
+}
+
 // ---------- Entry Point ----------
 
 static void Entry()
@@ -238,6 +334,9 @@ static void Entry()
     // create framebuffer
     Framebuffer framebuffer{ d3d_dev.Get(), swap_chain.Get() };
 
+    // initialize ImGui
+    ImGuiHandle imgui_handle{ window, d3d_dev.Get(), d3d_ctx.Get() };
+
     // main application loop
     {
         MSG msg{};
@@ -263,7 +362,7 @@ static void Entry()
 
                 // TODO: update
 
-                // render
+                // render scene
                 {
                     // clear back buffer
                     {
@@ -271,6 +370,13 @@ static void Entry()
                         d3d_ctx->ClearRenderTargetView(framebuffer.BackBufferRTV(), clear_color);
                     }
                 }
+
+                // render ImGui
+                imgui_handle.BeginFrame();
+                {
+                    ImGui::ShowDemoWindow();
+                }
+                imgui_handle.EndFrame(framebuffer.BackBufferRTV());
 
                 // present
                 {
