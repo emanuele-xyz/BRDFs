@@ -1,5 +1,7 @@
 // ---------- Standard Library Includes ----------
 
+#include <algorithm>
+#include <array> // for std::size
 #include <format>
 #include <iostream>
 #include <stacktrace>
@@ -8,10 +10,16 @@
 // ---------- Windows ----------
 
 #define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
 #include <Windows.h>
 
 #include <wrl/client.h> // for ComPtr
 namespace wrl = Microsoft::WRL;
+
+// ---------- DirectX Math ----------
+
+#include <DirectXMath.h>
+namespace dx = DirectX;
 
 // ---------- D3D11 and DXGI ----------
 
@@ -31,6 +39,16 @@ namespace wrl = Microsoft::WRL;
 #include <imgui_impl_win32.h>
 #include <imgui_impl_dx11.h>
 
+// ---------- HLSL Constant Buffers ----------
+
+#define matrix dx::XMFLOAT4X4
+#include <ConstantBuffers.hlsli>
+
+// ---------- Shader Bytecode ----------
+
+#include <VS.h>
+#include <PS.h>
+
 // ---------- Constants ----------
 
 constexpr const char* WIN32_WINDOW_CLASS_NAME{ "brdfs_window_class" };
@@ -39,6 +57,7 @@ constexpr const char* WIN32_WINDOW_TITLE{ "BRDFs" };
 // ---------- Assertions ----------
 
 #define Crash(msg) throw std::runtime_error{ std::format("[CRASH]: {}\n{}", msg, std::stacktrace::current()) };
+#define Unreachable() Crash("unreachable code path")
 #define Check(p) do { if (!(p)) Crash("Assertion failed: " #p); } while (false)
 #define CheckHR(hr) Check(SUCCEEDED(hr))
 
@@ -222,6 +241,191 @@ Framebuffer::Framebuffer(ID3D11Device* d3d_dev, IDXGISwapChain1* swap_chain)
     CheckHR(d3d_dev->CreateRenderTargetView(m_back_buffer.Get(), nullptr, m_back_buffer_rtv.ReleaseAndGetAddressOf()));
 }
 
+class Mesh
+{
+public:
+    static Mesh Cube(ID3D11Device* d3d_dev);
+public:
+    Mesh(ID3D11Device* d3d_dev, UINT vertex_count, UINT vertex_size, const void* vertices, UINT index_count, UINT index_size, const void* indices);
+    ~Mesh() = default;
+    Mesh(const Mesh&) = delete;
+    Mesh(Mesh&&) noexcept = delete;
+    Mesh& operator=(const Mesh&) = delete;
+    Mesh& operator=(Mesh&&) noexcept = delete;
+public:
+    ID3D11Buffer* const* Vertices() const noexcept { return m_vertices.GetAddressOf(); }
+    ID3D11Buffer* Indices() const noexcept { return m_indices.Get(); }
+    UINT VertexCount() const noexcept { return m_vertex_count; }
+    UINT IndexCount() const noexcept { return m_index_count; }
+    const UINT* Stride() const noexcept { return &m_stride; }
+    DXGI_FORMAT IndexFormat() const noexcept { return m_index_format; }
+    const UINT* Offset() const noexcept { return &m_offset; }
+private:
+    wrl::ComPtr<ID3D11Buffer> m_vertices;
+    wrl::ComPtr<ID3D11Buffer> m_indices;
+    UINT m_vertex_count;
+    UINT m_index_count;
+    UINT m_stride;
+    DXGI_FORMAT m_index_format;
+    UINT m_offset;
+};
+
+Mesh Mesh::Cube(ID3D11Device* d3d_dev)
+{
+    struct Vertex
+    {
+        dx::XMFLOAT3 position;
+    };
+
+    Vertex vertices[]
+    {
+        // front face (Z+)
+        { { -0.5f, -0.5f, +0.5f } },
+        { { +0.5f, -0.5f, +0.5f } },
+        { { +0.5f, +0.5f, +0.5f } },
+        { { -0.5f, +0.5f, +0.5f } },
+
+        // back face (Z-)
+        { { +0.5f, -0.5f, -0.5f } },
+        { { -0.5f, -0.5f, -0.5f } },
+        { { -0.5f, +0.5f, -0.5f } },
+        { { +0.5f, +0.5f, -0.5f } },
+
+        // left face (X-)
+        { { -0.5f, -0.5f, -0.5f } },
+        { { -0.5f, -0.5f, +0.5f } },
+        { { -0.5f, +0.5f, +0.5f } },
+        { { -0.5f, +0.5f, -0.5f } },
+
+        // right face (X+)
+        { { +0.5f, -0.5f, +0.5f } },
+        { { +0.5f, -0.5f, -0.5f } },
+        { { +0.5f, +0.5f, -0.5f } },
+        { { +0.5f, +0.5f, +0.5f } },
+
+        // top face (Y+)
+        { { -0.5f, +0.5f, +0.5f } },
+        { { +0.5f, +0.5f, +0.5f } },
+        { { +0.5f, +0.5f, -0.5f } },
+        { { -0.5f, +0.5f, -0.5f } },
+
+        // bottom face (Y-)
+        { { -0.5f, -0.5f, -0.5f } },
+        { { +0.5f, -0.5f, -0.5f } },
+        { { +0.5f, -0.5f, +0.5f } },
+        { { -0.5f, -0.5f, +0.5f } },
+    };
+
+    UINT indices[]
+    {
+        // front
+        0, 1, 2,
+        0, 2, 3,
+
+        // back
+        4, 5, 6,
+        4, 6, 7,
+
+        // left
+        8, 9,10,
+        8,10,11,
+
+        // right
+        12,13,14,
+        12,14,15,
+
+        // top 
+        16,17,18,
+        16,18,19,
+
+        // bottom
+        20,21,22,
+        20,22,23
+    };
+
+    return { d3d_dev, std::size(vertices), sizeof(*vertices), vertices, std::size(indices), sizeof(*indices), indices };
+}
+
+Mesh::Mesh(ID3D11Device* d3d_dev, UINT vertex_count, UINT vertex_size, const void* vertices, UINT index_count, UINT index_size, const void* indices)
+    : m_vertices{}
+    , m_indices{}
+    , m_vertex_count{ vertex_count }
+    , m_index_count{ index_count }
+    , m_stride{ vertex_size }
+    , m_index_format{}
+    , m_offset{}
+{
+    Check(vertex_count > 0);
+    Check(index_count > 0);
+    Check(vertex_size > 0);
+    Check(index_size > 0 && (index_size == 2 || index_size == 4));
+
+    // set index format based on index stride
+    switch (index_size)
+    {
+    case 2: { m_index_format = DXGI_FORMAT_R16_UINT; } break;
+    case 4: { m_index_format = DXGI_FORMAT_R32_UINT; } break;
+    default: { Unreachable(); } break;
+    }
+
+    // upload vertices to the GPU
+    {
+        D3D11_BUFFER_DESC desc{};
+        desc.ByteWidth = m_vertex_count * vertex_size;
+        desc.Usage = D3D11_USAGE_IMMUTABLE;
+        desc.BindFlags = D3D11_BIND_VERTEX_BUFFER;
+        D3D11_SUBRESOURCE_DATA data{};
+        data.pSysMem = vertices;
+        data.SysMemPitch = 0;
+        data.SysMemSlicePitch = 0;
+        CheckHR(d3d_dev->CreateBuffer(&desc, &data, m_vertices.ReleaseAndGetAddressOf()));
+    }
+
+    // upload indices to the GPU
+    {
+        D3D11_BUFFER_DESC desc{};
+        desc.ByteWidth = m_index_count * index_size;
+        desc.Usage = D3D11_USAGE_IMMUTABLE;
+        desc.BindFlags = D3D11_BIND_INDEX_BUFFER;
+        D3D11_SUBRESOURCE_DATA data{};
+        data.pSysMem = indices;
+        data.SysMemPitch = 0;
+        data.SysMemSlicePitch = 0;
+        CheckHR(d3d_dev->CreateBuffer(&desc, &data, m_indices.ReleaseAndGetAddressOf()));
+    }
+}
+
+class SubresourceMap
+{
+public:
+    SubresourceMap(ID3D11DeviceContext* d3d_ctx, ID3D11Resource* res, UINT subres_idx, D3D11_MAP map_type, UINT map_flags);
+    ~SubresourceMap();
+    SubresourceMap(const SubresourceMap&) = delete;
+    SubresourceMap(SubresourceMap&&) noexcept = delete;
+    SubresourceMap& operator=(const SubresourceMap&) = delete;
+    SubresourceMap& operator=(SubresourceMap&&) noexcept = delete;
+public:
+    void* Data() { return m_mapped_subres.pData; }
+private:
+    ID3D11DeviceContext* m_d3d_ctx;
+    ID3D11Resource* m_res;
+    UINT m_subres_idx;
+    D3D11_MAPPED_SUBRESOURCE m_mapped_subres;
+};
+
+SubresourceMap::SubresourceMap(ID3D11DeviceContext* d3d_ctx, ID3D11Resource* res, UINT subres_idx, D3D11_MAP map_type, UINT map_flags)
+    : m_d3d_ctx{ d3d_ctx }
+    , m_res{ res }
+    , m_subres_idx{ subres_idx }
+    , m_mapped_subres{}
+{
+    CheckHR(m_d3d_ctx->Map(m_res, m_subres_idx, map_type, map_flags, &m_mapped_subres));
+}
+SubresourceMap::~SubresourceMap()
+{
+    m_d3d_ctx->Unmap(m_res, m_subres_idx);
+}
+
 // ---------- ImGui Utilities ----------
 
 class ImGuiHandle
@@ -302,6 +506,19 @@ void ImGuiHandle::EndFrame(ID3D11RenderTargetView* rtv) const noexcept
     ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
 }
 
+namespace ImGuiEx
+{
+    bool DragFloat3(const char* label, DirectX::XMFLOAT3& v, float v_speed = 1.0f, float v_min = 0.0f, float v_max = 0.0f, const char* format = "%.3f", ImGuiSliderFlags flags = 0)
+    {
+        float buf[3]{ v.x, v.y, v.z };
+        bool res{ ImGui::DragFloat3(label, buf, v_speed, v_min, v_max, format, flags) };
+        v.x = buf[0];
+        v.y = buf[1];
+        v.z = buf[2];
+        return res;
+    }
+}
+
 // ---------- Entry Point ----------
 
 static void Entry()
@@ -337,6 +554,74 @@ static void Entry()
     // initialize ImGui
     ImGuiHandle imgui_handle{ window, d3d_dev.Get(), d3d_ctx.Get() };
 
+    // shaders
+    wrl::ComPtr<ID3D11VertexShader> vs{};
+    CheckHR(d3d_dev->CreateVertexShader(VS_bytes, sizeof(VS_bytes), nullptr, vs.ReleaseAndGetAddressOf()));
+    wrl::ComPtr<ID3D11PixelShader> ps{};
+    CheckHR(d3d_dev->CreatePixelShader(PS_bytes, sizeof(PS_bytes), nullptr, ps.ReleaseAndGetAddressOf()));
+
+    // input layout
+    wrl::ComPtr<ID3D11InputLayout> input_layout{};
+    {
+        D3D11_INPUT_ELEMENT_DESC desc[]
+        {
+            { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, D3D11_APPEND_ALIGNED_ELEMENT, D3D11_INPUT_PER_VERTEX_DATA, 0 },
+        };
+        CheckHR(d3d_dev->CreateInputLayout(desc, std::size(desc), VS_bytes, sizeof(VS_bytes), input_layout.ReleaseAndGetAddressOf()));
+    }
+
+    // default rasterizer state
+    wrl::ComPtr<ID3D11RasterizerState> rs_default{};
+    {
+        D3D11_RASTERIZER_DESC desc{};
+        desc.FillMode = D3D11_FILL_SOLID;
+        desc.CullMode = D3D11_CULL_BACK;
+        desc.FrontCounterClockwise = true;
+        desc.DepthBias = 0;
+        desc.DepthBiasClamp = 0.0f;
+        desc.SlopeScaledDepthBias = 0.0f;
+        desc.DepthClipEnable = true;
+        desc.ScissorEnable = false;
+        desc.MultisampleEnable = false;
+        desc.AntialiasedLineEnable = false;
+        CheckHR(d3d_dev->CreateRasterizerState(&desc, rs_default.ReleaseAndGetAddressOf()));
+    }
+
+    // scene constant buffer
+    wrl::ComPtr<ID3D11Buffer> cb_scene{};
+    {
+        D3D11_BUFFER_DESC desc{};
+        desc.ByteWidth = sizeof(SceneConstants);
+        desc.Usage = D3D11_USAGE_DYNAMIC;
+        desc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+        desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+        CheckHR(d3d_dev->CreateBuffer(&desc, nullptr, cb_scene.ReleaseAndGetAddressOf()));
+    }
+
+    // object constant buffer
+    wrl::ComPtr<ID3D11Buffer> cb_object{};
+    {
+        D3D11_BUFFER_DESC desc{};
+        desc.ByteWidth = sizeof(ObjectConstants);
+        desc.Usage = D3D11_USAGE_DYNAMIC;
+        desc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+        desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+        CheckHR(d3d_dev->CreateBuffer(&desc, nullptr, cb_object.ReleaseAndGetAddressOf()));
+    }
+
+    // cube mesh
+    Mesh cube{ Mesh::Cube(d3d_dev.Get()) };
+
+    // camera
+    float camera_fov_deg{ 45.0f };
+    dx::XMFLOAT3 camera_position{ 2.0f, 2.0f, -5.0f };
+    dx::XMFLOAT3 camera_target{};
+    float camera_near{ 0.1f };
+    float camera_far{ 100.0f };
+
+    // sphere
+    dx::XMFLOAT3 sphere_position{};
+
     // main application loop
     {
         MSG msg{};
@@ -360,21 +645,129 @@ static void Entry()
                     s_did_resize = false; // resize event handled
                 }
 
+                // fetch window size
+                float window_w{};
+                float window_h{};
+                {
+                    RECT rect{};
+                    Check(GetClientRect(window, &rect)); // the right and bottom members contain the width and height of the window
+                    constexpr LONG MIN_WINDOW_DIMENSION{ 8 };
+                    window_w = static_cast<float>(std::max(rect.right, MIN_WINDOW_DIMENSION)); // sanitize window size; having size 0 may yield to problems
+                    window_h = static_cast<float>(std::max(rect.bottom, MIN_WINDOW_DIMENSION)); // sanitize window size; having size 0 may yield to problems
+                }
+
                 // TODO: update
 
                 // render scene
                 {
+                    // configure viewport
+                    D3D11_VIEWPORT viewport{};
+                    viewport.TopLeftX = 0.0f;
+                    viewport.TopLeftY = 0.0f;
+                    viewport.Width = window_w;
+                    viewport.Height = window_h;
+                    viewport.MinDepth = 0.0f;
+                    viewport.MaxDepth = 1.0f;
+
                     // clear back buffer
                     {
                         float clear_color[4]{ 0.2f, 0.3f, 0.3f, 1.0f };
                         d3d_ctx->ClearRenderTargetView(framebuffer.BackBufferRTV(), clear_color);
+                    }
+
+                    // prepare pipeline for drawing
+                    {
+                        ID3D11RenderTargetView* rtv{ framebuffer.BackBufferRTV() };
+                        ID3D11Buffer* cbufs[]{ cb_scene.Get(), cb_object.Get() };
+
+                        d3d_ctx->ClearState();
+
+                        d3d_ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+                        d3d_ctx->IASetInputLayout(input_layout.Get());
+                        d3d_ctx->VSSetShader(vs.Get(), nullptr, 0);
+                        d3d_ctx->VSSetConstantBuffers(0, std::size(cbufs), cbufs);
+                        d3d_ctx->PSSetShader(ps.Get(), nullptr, 0);
+                        d3d_ctx->PSSetConstantBuffers(0, std::size(cbufs), cbufs);
+                        d3d_ctx->RSSetState(rs_default.Get());
+                        d3d_ctx->RSSetViewports(1, &viewport);
+                        d3d_ctx->OMSetRenderTargets(1, &rtv, nullptr);
+                    }
+
+                    // upload scene constants
+                    {
+                        // compute view matrix
+                        dx::XMMATRIX view{};
+                        {
+                            dx::XMVECTOR eye{ dx::XMLoadFloat3(&camera_position) };
+                            dx::XMVECTOR target{ dx::XMLoadFloat3(&camera_target) };
+                            dx::XMVECTOR up{ dx::XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f) };
+                            view = dx::XMMatrixLookAtLH(eye, target, up);
+                        }
+
+                        // compute projection matrix
+                        dx::XMMATRIX projection{};
+                        {
+                            float fov_rad{ dx::XMConvertToRadians(camera_fov_deg) };
+                            float aspect{ window_w / window_h };
+                            projection = dx::XMMatrixPerspectiveFovLH(fov_rad, aspect, camera_near, camera_far);
+                        }
+
+                        // upload
+                        {
+                            SubresourceMap map{ d3d_ctx.Get(), cb_scene.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0 };
+                            auto constants{ static_cast<SceneConstants*>(map.Data()) };
+                            dx::XMStoreFloat4x4(&constants->view, view);
+                            dx::XMStoreFloat4x4(&constants->projection, projection);
+                        }
+                    }
+
+                    // render sphere
+                    {
+                        // upload object constants
+                        {
+                            // build model matrix
+                            dx::XMMATRIX model{};
+                            {
+                                dx::XMVECTOR scaling{ dx::XMVectorSet(1.0f, 1.0f, 1.0f, 1.0f) };
+                                dx::XMVECTOR origin{ dx::XMVectorZero() };
+                                dx::XMVECTOR rotation{ dx::XMQuaternionIdentity() };
+                                dx::XMVECTOR translation{ dx::XMLoadFloat3(&sphere_position) };
+                                model = dx::XMMatrixAffineTransformation(scaling, origin, rotation, translation);
+                            }
+
+                            // upload
+                            {
+                                SubresourceMap map{ d3d_ctx.Get(), cb_object.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0 };
+                                auto constants{ static_cast<ObjectConstants*>(map.Data()) };
+                                dx::XMStoreFloat4x4(&constants->model, model);
+                            }
+                        }
+
+                        // set pipeline state
+                        d3d_ctx->IASetIndexBuffer(cube.Indices(), cube.IndexFormat(), 0);
+                        d3d_ctx->IASetVertexBuffers(0, 1, cube.Vertices(), cube.Stride(), cube.Offset());
+
+                        // draw
+                        d3d_ctx->DrawIndexed(cube.IndexCount(), 0, 0);
                     }
                 }
 
                 // render ImGui
                 imgui_handle.BeginFrame();
                 {
-                    ImGui::ShowDemoWindow();
+                    ImGui::Begin("BRDFs");
+                    {
+                        if (ImGui::CollapsingHeader("Sphere", ImGuiTreeNodeFlags_DefaultOpen))
+                        {
+                            ImGuiEx::DragFloat3("Position##Sphere", sphere_position, 0.01f);
+                        }
+                        if (ImGui::CollapsingHeader("Camera", ImGuiTreeNodeFlags_DefaultOpen))
+                        {
+                            ImGuiEx::DragFloat3("Position##Camera", camera_position, 0.01f);
+                            ImGuiEx::DragFloat3("Target", camera_target, 0.01f);
+                        }
+                    }
+                    ImGui::End();
                 }
                 imgui_handle.EndFrame(framebuffer.BackBufferRTV());
 

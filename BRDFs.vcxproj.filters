@@ -66,4 +66,12 @@
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
+  <ItemGroup>
+    <FxCompile Include="VS.hlsl" />
+    <FxCompile Include="PS.hlsl" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="ConstantBuffers.hlsli" />
+    <None Include="Commons.hlsli" />
+  </ItemGroup>
 </Project>
