@@ -5,13 +5,17 @@ struct SceneConstants
 {
     matrix view;
     matrix projection;
+    float3 world_eye;
+    float _pad[1];
 };
 
 struct ObjectConstants
 {
     matrix model;
     float3 color;
-    float _pad[1];
+    float _pad0;
+    float3 position;
+    float radius;
 };
 
 #endif

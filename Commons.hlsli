@@ -11,6 +11,7 @@ struct VSInput
 struct VSOutput
 {
     float4 clip_position : SV_POSITION;
+    float3 world_position: POSITION;
 };
 
 cbuffer CBScene : register(b0)

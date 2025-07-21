@@ -733,6 +733,7 @@ static void Entry()
                             auto constants{ static_cast<SceneConstants*>(map.Data()) };
                             dx::XMStoreFloat4x4(&constants->view, view);
                             dx::XMStoreFloat4x4(&constants->projection, projection);
+                            constants->world_eye = camera_position;
                         }
                     }
 
@@ -740,10 +741,13 @@ static void Entry()
                     {
                         // upload object constants
                         {
+                            constexpr float RADIUS{ 0.5f }; // sphere radius (given by local box geometry)
+                            constexpr float DIAMETER{ RADIUS * 2.0f }; // sphere diameter
+
                             // build model matrix
                             dx::XMMATRIX model{};
                             {
-                                dx::XMVECTOR scaling{ dx::XMVectorSet(1.0f, 1.0f, 1.0f, 1.0f) };
+                                dx::XMVECTOR scaling{ dx::XMVectorSet(DIAMETER, DIAMETER, DIAMETER, 0.0f) };
                                 dx::XMVECTOR origin{ dx::XMVectorZero() };
                                 dx::XMVECTOR rotation{ dx::XMQuaternionIdentity() };
                                 dx::XMVECTOR translation{ dx::XMLoadFloat3(&sphere_position) };
@@ -756,6 +760,8 @@ static void Entry()
                                 auto constants{ static_cast<ObjectConstants*>(map.Data()) };
                                 dx::XMStoreFloat4x4(&constants->model, model);
                                 constants->color = sphere_color;
+                                constants->position = sphere_position;
+                                constants->radius = RADIUS;
                             }
                         }
 
@@ -771,10 +777,13 @@ static void Entry()
                     {
                         // upload object constants
                         {
+                            constexpr float RADIUS{ 0.5f }; // light sphere radius (given by local box geometry)
+                            constexpr float DIAMETER{ RADIUS * 2.0f }; // light sphere diameter
+
                             // build model matrix
                             dx::XMMATRIX model{};
                             {
-                                dx::XMVECTOR scaling{ dx::XMVectorSet(1.0f, 1.0f, 1.0f, 1.0f) };
+                                dx::XMVECTOR scaling{ dx::XMVectorSet(DIAMETER, DIAMETER, DIAMETER, 0.0f) };
                                 dx::XMVECTOR origin{ dx::XMVectorZero() };
                                 dx::XMVECTOR rotation{ dx::XMQuaternionIdentity() };
                                 dx::XMVECTOR translation{ dx::XMLoadFloat3(&light_position) };
@@ -787,6 +796,8 @@ static void Entry()
                                 auto constants{ static_cast<ObjectConstants*>(map.Data()) };
                                 dx::XMStoreFloat4x4(&constants->model, model);
                                 constants->color = light_color;
+                                constants->position = light_position;
+                                constants->radius = RADIUS;
                             }
                         }
 
