@@ -10,6 +10,8 @@ struct SceneConstants
 struct ObjectConstants
 {
     matrix model;
+    float3 color;
+    float _pad[1];
 };
 
 #endif

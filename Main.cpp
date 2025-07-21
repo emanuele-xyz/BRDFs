@@ -42,7 +42,10 @@ namespace dx = DirectX;
 // ---------- HLSL Constant Buffers ----------
 
 #define matrix dx::XMFLOAT4X4
+#define float3 dx::XMFLOAT3
 #include <ConstantBuffers.hlsli>
+#undef matrix
+#undef float3
 
 // ---------- Shader Bytecode ----------
 
@@ -517,6 +520,15 @@ namespace ImGuiEx
         v.z = buf[2];
         return res;
     }
+    bool ColorEdit3(const char* label, DirectX::XMFLOAT3& col, ImGuiColorEditFlags flags = 0)
+    {
+        float buf[3]{ col.x, col.y, col.z };
+        bool res{ ImGui::ColorEdit3(label, buf, flags) };
+        col.x = buf[0];
+        col.y = buf[1];
+        col.z = buf[2];
+        return res;
+    }
 }
 
 // ---------- Entry Point ----------
@@ -621,6 +633,11 @@ static void Entry()
 
     // sphere
     dx::XMFLOAT3 sphere_position{};
+    dx::XMFLOAT3 sphere_color{ 1.0f, 0.0f, 0.0f };
+
+    // light
+    dx::XMFLOAT3 light_position{ 2.0f, 1.0f, 2.0f };
+    dx::XMFLOAT3 light_color{ 1.0f, 1.0f, 1.0f };
 
     // main application loop
     {
@@ -655,8 +672,6 @@ static void Entry()
                     window_w = static_cast<float>(std::max(rect.right, MIN_WINDOW_DIMENSION)); // sanitize window size; having size 0 may yield to problems
                     window_h = static_cast<float>(std::max(rect.bottom, MIN_WINDOW_DIMENSION)); // sanitize window size; having size 0 may yield to problems
                 }
-
-                // TODO: update
 
                 // render scene
                 {
@@ -740,6 +755,38 @@ static void Entry()
                                 SubresourceMap map{ d3d_ctx.Get(), cb_object.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0 };
                                 auto constants{ static_cast<ObjectConstants*>(map.Data()) };
                                 dx::XMStoreFloat4x4(&constants->model, model);
+                                constants->color = sphere_color;
+                            }
+                        }
+
+                        // set pipeline state
+                        d3d_ctx->IASetIndexBuffer(cube.Indices(), cube.IndexFormat(), 0);
+                        d3d_ctx->IASetVertexBuffers(0, 1, cube.Vertices(), cube.Stride(), cube.Offset());
+
+                        // draw
+                        d3d_ctx->DrawIndexed(cube.IndexCount(), 0, 0);
+                    }
+
+                    // render light
+                    {
+                        // upload object constants
+                        {
+                            // build model matrix
+                            dx::XMMATRIX model{};
+                            {
+                                dx::XMVECTOR scaling{ dx::XMVectorSet(1.0f, 1.0f, 1.0f, 1.0f) };
+                                dx::XMVECTOR origin{ dx::XMVectorZero() };
+                                dx::XMVECTOR rotation{ dx::XMQuaternionIdentity() };
+                                dx::XMVECTOR translation{ dx::XMLoadFloat3(&light_position) };
+                                model = dx::XMMatrixAffineTransformation(scaling, origin, rotation, translation);
+                            }
+                            
+                            // upload
+                            {
+                                SubresourceMap map{ d3d_ctx.Get(), cb_object.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0 };
+                                auto constants{ static_cast<ObjectConstants*>(map.Data()) };
+                                dx::XMStoreFloat4x4(&constants->model, model);
+                                constants->color = light_color;
                             }
                         }
 
@@ -757,14 +804,20 @@ static void Entry()
                 {
                     ImGui::Begin("BRDFs");
                     {
-                        if (ImGui::CollapsingHeader("Sphere", ImGuiTreeNodeFlags_DefaultOpen))
-                        {
-                            ImGuiEx::DragFloat3("Position##Sphere", sphere_position, 0.01f);
-                        }
                         if (ImGui::CollapsingHeader("Camera", ImGuiTreeNodeFlags_DefaultOpen))
                         {
                             ImGuiEx::DragFloat3("Position##Camera", camera_position, 0.01f);
                             ImGuiEx::DragFloat3("Target", camera_target, 0.01f);
+                        }
+                        if (ImGui::CollapsingHeader("Sphere", ImGuiTreeNodeFlags_DefaultOpen))
+                        {
+                            ImGuiEx::DragFloat3("Position##Sphere", sphere_position, 0.01f);
+                            ImGuiEx::ColorEdit3("Color##Sphere", sphere_color);
+                        }
+                        if (ImGui::CollapsingHeader("Light", ImGuiTreeNodeFlags_DefaultOpen))
+                        {
+                            ImGuiEx::DragFloat3("Position##Light", light_position, 0.01f);
+                            ImGuiEx::ColorEdit3("Color##Light", light_color);
                         }
                     }
                     ImGui::End();
