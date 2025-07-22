@@ -1,7 +1,17 @@
 #include "Commons.hlsli"
 
-float4 main(VSOutput input) : SV_TARGET
+struct PSOutput
+{
+    float4 color : SV_TARGET;
+    float depth : SV_DEPTH;
+};
+
+PSOutput main(VSOutput input)
 {  
+    PSOutput output;
+    output.color = float4(cb_object.color, 1);
+    output.depth = 1.0f;
+    
     float3 center = cb_object.position; // sphere center
     float radius = cb_object.radius; // sphere radius
     float3 origin = cb_scene.world_eye; // ray world space origin
@@ -38,7 +48,15 @@ float4 main(VSOutput input) : SV_TARGET
         {
             discard;
         }
+        
+        // compute updated depth of the fragment
+        float3 p_world = origin + t * direction; // plug t into the ray equation to find the intersection point
+        float4 p_clip = mul(cb_scene.projection, mul(cb_scene.view, float4(p_world, 1))); // go from world space to clip space
+        float4 p_ndc = p_clip / p_clip.w; // manual perspective divide
+
+        // write computed depth
+        output.depth = p_ndc.z;
     }
     
-    return float4(cb_object.color, 1);
+    return output;
 }

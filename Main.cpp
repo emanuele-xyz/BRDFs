@@ -222,26 +222,44 @@ public:
 public:
     ID3D11Texture2D* BackBuffer() const noexcept { return m_back_buffer.Get(); }
     ID3D11RenderTargetView* BackBufferRTV() const noexcept { return m_back_buffer_rtv.Get(); }
-
+    ID3D11Texture2D* DepthBuffer() const noexcept { return m_depth_buffer.Get(); }
+    ID3D11DepthStencilView* DSV() const noexcept { return m_dsv.Get(); }
 private:
     wrl::ComPtr<ID3D11Texture2D> m_back_buffer;
     wrl::ComPtr<ID3D11RenderTargetView> m_back_buffer_rtv;
+    wrl::ComPtr<ID3D11Texture2D> m_depth_buffer;
+    wrl::ComPtr<ID3D11DepthStencilView> m_dsv;
 };
 
 Framebuffer::Framebuffer()
     : m_back_buffer{}
     , m_back_buffer_rtv{}
+    , m_depth_buffer{}
+    , m_dsv{}
 {
 }
 Framebuffer::Framebuffer(ID3D11Device* d3d_dev, IDXGISwapChain1* swap_chain)
-    : m_back_buffer{}
-    , m_back_buffer_rtv{}
+    : Framebuffer{}
 {
     // get swap chain back buffer
     CheckHR(swap_chain->GetBuffer(0, IID_PPV_ARGS(m_back_buffer.ReleaseAndGetAddressOf())));
 
     // create swap chain back buffer rtv
     CheckHR(d3d_dev->CreateRenderTargetView(m_back_buffer.Get(), nullptr, m_back_buffer_rtv.ReleaseAndGetAddressOf()));
+
+    // get back buffer desc
+    D3D11_TEXTURE2D_DESC desc{};
+    m_back_buffer->GetDesc(&desc);
+
+    // adapt back buffer desc for depth stencil buffer
+    desc.Format = DXGI_FORMAT_D32_FLOAT;
+    desc.BindFlags = D3D11_BIND_DEPTH_STENCIL;
+
+    // create depth stencil buffer
+    CheckHR(d3d_dev->CreateTexture2D(&desc, nullptr, m_depth_buffer.ReleaseAndGetAddressOf()));
+
+    // create dsv
+    CheckHR(d3d_dev->CreateDepthStencilView(m_depth_buffer.Get(), nullptr, m_dsv.ReleaseAndGetAddressOf()));
 }
 
 class Mesh
@@ -588,7 +606,7 @@ static void Entry()
         D3D11_RASTERIZER_DESC desc{};
         desc.FillMode = D3D11_FILL_SOLID;
         desc.CullMode = D3D11_CULL_BACK;
-        desc.FrontCounterClockwise = true;
+        desc.FrontCounterClockwise = false;
         desc.DepthBias = 0;
         desc.DepthBiasClamp = 0.0f;
         desc.SlopeScaledDepthBias = 0.0f;
@@ -688,6 +706,7 @@ static void Entry()
                     {
                         float clear_color[4]{ 0.2f, 0.3f, 0.3f, 1.0f };
                         d3d_ctx->ClearRenderTargetView(framebuffer.BackBufferRTV(), clear_color);
+                        d3d_ctx->ClearDepthStencilView(framebuffer.DSV(), D3D11_CLEAR_DEPTH, 1.0f, 0);
                     }
 
                     // prepare pipeline for drawing
@@ -705,7 +724,7 @@ static void Entry()
                         d3d_ctx->PSSetConstantBuffers(0, std::size(cbufs), cbufs);
                         d3d_ctx->RSSetState(rs_default.Get());
                         d3d_ctx->RSSetViewports(1, &viewport);
-                        d3d_ctx->OMSetRenderTargets(1, &rtv, nullptr);
+                        d3d_ctx->OMSetRenderTargets(1, &rtv, framebuffer.DSV());
                     }
 
                     // upload scene constants
@@ -777,7 +796,7 @@ static void Entry()
                     {
                         // upload object constants
                         {
-                            constexpr float RADIUS{ 0.5f }; // light sphere radius (given by local box geometry)
+                            constexpr float RADIUS{ 0.25f }; // light sphere radius (given by local box geometry)
                             constexpr float DIAMETER{ RADIUS * 2.0f }; // light sphere diameter
 
                             // build model matrix
@@ -789,7 +808,7 @@ static void Entry()
                                 dx::XMVECTOR translation{ dx::XMLoadFloat3(&light_position) };
                                 model = dx::XMMatrixAffineTransformation(scaling, origin, rotation, translation);
                             }
-                            
+
                             // upload
                             {
                                 SubresourceMap map{ d3d_ctx.Get(), cb_object.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0 };
